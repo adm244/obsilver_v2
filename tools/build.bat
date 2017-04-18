@@ -5,7 +5,7 @@ REM https://github.com/adm244/cdev
 SETLOCAL
 REM [customize those variables]
 SET libs=kernel32.lib user32.lib
-SET files=%source%\main.c
+SET files=%source%\main.cpp
 SET hookfile=%source%\dinput_hook\main.cpp
 SET deffile=%source%\dinput_hook\exports.def
 SET hookname=dinput8
