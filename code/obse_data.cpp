@@ -2,6 +2,8 @@
 
 //IMPORTANT(adm244): COPIED FROM OBSE SOURCE
 
+#include <stdio.h>
+
 typedef unsigned char       UInt8;    //!< An unsigned 8-bit integer value
 typedef unsigned short      UInt16;   //!< An unsigned 16-bit integer value
 typedef unsigned long       UInt32;   //!< An unsigned 32-bit integer value
@@ -429,8 +431,18 @@ bool Script::CompileAndRun(void * unk0, UInt32 unk1, void * unk2)
 
 typedef void * (* _GetGlobalScriptStateObj)(void);
 extern const _GetGlobalScriptStateObj GetGlobalScriptStateObj;
-
 const _GetGlobalScriptStateObj GetGlobalScriptStateObj = (_GetGlobalScriptStateObj)0x00585C10;
+
+// unk1 = 0, unk2 = 1
+typedef bool (* _QueueUIMessage)(const char * string, UInt32 unk1, UInt32 unk2, float duration);
+extern const _QueueUIMessage QueueUIMessage;
+const _QueueUIMessage QueueUIMessage = (_QueueUIMessage)0x0057ACC0;
+
+//displays icon and plays sound (used by Additem, Addspell, etc...)
+//ddsPath relative to Textures\Menus\...  soundID as defined in the CS
+typedef bool (* _QueueUIMessage_2)(const char * string, float duration, const char * ddsPath, const char * soundID);
+extern const _QueueUIMessage_2 QueueUIMessage_2;
+const _QueueUIMessage_2 QueueUIMessage_2 = (_QueueUIMessage_2)0x0057ADD0;
 
 void Script::Constructor(void)
 {
@@ -456,10 +468,10 @@ void Script::SetText(const char * buf)
 bool RunScriptLine(const char* buf)
 {
   // create a Script object
-  UInt8	scriptObjBuf[sizeof(Script)];
-  Script	* tempScriptObj = (Script *)scriptObjBuf;
+  UInt8 scriptObjBuf[sizeof(Script)];
+  Script  * tempScriptObj = (Script *)scriptObjBuf;
 
-  void	* scriptState = GetGlobalScriptStateObj();
+  void  * scriptState = GetGlobalScriptStateObj();
 
   tempScriptObj->Constructor();
   tempScriptObj->MarkAsTemporary();
@@ -468,5 +480,36 @@ bool RunScriptLine(const char* buf)
   tempScriptObj->StaticDestructor();
 
   return bResult;
+}
+
+bool RunBatchScript(char *filename)
+{
+  bool result = false;
+
+  FILE *src = NULL;
+  fopen_s(&src, filename, "r");
+  
+  if( src ){
+    char line[4096];
+    
+    while( fgets(line, sizeof(line), src) ){
+      UInt32 lineLen = strlen(line);
+      
+      if( lineLen > 1 ){
+        if(line[lineLen - 1] == '\n'){
+          line[lineLen - 1] = 0;
+        }
+
+        result = RunScriptLine(line);
+        if( !result ){
+          break;
+        }
+      }
+    }
+
+    fclose(src);
+  }
+
+  return result;
 }
 // -------------------------------------------------------------------------

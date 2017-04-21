@@ -24,14 +24,14 @@ OTHER DEALINGS IN THE SOFTWARE.
 */
 
 //IMPORTANT(adm244): SCRATCH VERSION JUST TO GET IT UP WORKING
-//IMPORTANT(adm244): used code from OBSE (http://obse.silverlock.org/)
+//IMPORTANT(adm244): some code used from OBSE (http://obse.silverlock.org/)
 
 /*
   RE:
     Game main loop, window is active: 0040F19D
     To avoid OBSE conflicts patch here: 0040F1A3
     
-    PrintCommandToConsole(?) address: 00585C90
+    PrintToConsole address: 00585C90
     
     CompileAndRun address: 004FBF00
     CompileAndRun signature:
@@ -39,10 +39,33 @@ OTHER DEALINGS IN THE SOFTWARE.
     
     ScriptExecute address: 004FBE00
     ScriptExecute signature:
-      int _stdcall (TESObjectREFR *thisObj, ScriptEventList *eventList, TESObjectREFR *containingObj, int arg3);
+      int __stdcall (TESObjectREFR *thisObj, ScriptEventList *eventList, TESObjectREFR *containingObj, int arg3);
+    
+    NOTES:
+      - 'BAT' command algorithm (possibly)
+        1) get filename
+        2) try to open file
+        3) read contents of file
+        4) close file
+        5) create Script object
+          (loop start)
+        6) set its text to current line
+        7) call CompileAndRun on that object
+          (loop end)
+        8) destroy Script object
+        
+        So, that's probably why OBSE implemented exactly that,
+        since 'bat' is not a command that can be compiled as a script
+        you cannot set it as text for Script object and call CompileAndRun.
+        
+        Could try to RE to figure out how to call that 'bat' behavior,
+        but it looks like it's much easier to implement everything myself.
     
     TODO:
-      - Toggle UI Messages (get from OBSE)
+      - (DONE) Toggle UI Messages (get from OBSE)
+      - (DONE) Show UI Message (get from OBSE)
+      - Gameplay state (loading screen, main menu, etc...)
+      - Save game
       - something else ?
 */
 
@@ -54,6 +77,11 @@ OTHER DEALINGS IN THE SOFTWARE.
 //NOTE(adm244): addresses for hooks (oblivion 1.2.416)
 internal const UInt32 mainloop_hook_patch_address = 0x0040F1A3;
 internal const UInt32 mainloop_hook_return_address = 0x0040F1A8;
+internal const UInt32 showuimessage_patch_address = 0x0057ACC0;
+internal const UInt32 showuimessage_2_patch_address = 0x0057ADD0;
+
+internal bool isKeyHomeEnabled = true;
+internal bool isKeyEndEnabled = true;
 
 //NOTE(adm244): returns whenever key is pressed or not
 internal int GetKeyPressed(byte key)
@@ -62,11 +90,72 @@ internal int GetKeyPressed(byte key)
   return( (keystate & 0x8000) > 0 );
 }
 
+//NOTE(adm244): checks if key was pressed and locks its state
+// returns true if key wasn't pressed in previous frame but it is in this one
+// returns false if key is not pressed or is hold down
+internal bool IsActivated(byte key, bool *enabled)
+{
+  if( GetKeyPressed(key) ){
+    if( *enabled ){
+      *enabled = false;
+      return(true);
+    }
+  } else{
+    *enabled = true;
+  }
+  return(false);
+}
+
+//NOTE(adm244): enables\disables any ui messages upper left courner of the screen
+//NOTE(adm244): it doesn't disable some sounds (skill increase messages would still have sound played)
+//NOTE(adm244): obse can patch this address as well
+// suppress = true - disables ui messages
+// suppress = false - enables ui messages
+internal void SuppressUIMessages(bool suppress)
+{
+  //NOTE(adm244): oblivion 1.2.416
+  // QUIMsg_2PatchAddr = 0057ADD0
+  // Original instruction: D9EE (fldz - (fpu x87) load +0.0)
+  // Patch: 0xC390 (ret, nop)
+  //
+  // QUIMsg_PatchAddr = 0057ACC0
+  // Original instruction: 51 (push eax)
+  // Patch: 0xC3 (ret)
+
+  //IMPORTANT(adm244): looks like SafeWrite16(..) is all messed up
+  // it writes the highest byte twice instead of two bytes as it should.
+  // am I missing something here?
+  if( suppress ){
+    SafeWrite8(showuimessage_patch_address, 0xC3);
+    SafeWrite8(showuimessage_2_patch_address, 0xC3);
+    SafeWrite8(showuimessage_2_patch_address + 1, 0x90);
+  } else{
+    SafeWrite8(showuimessage_patch_address, 0x51);
+    SafeWrite8(showuimessage_2_patch_address, 0xD9);
+    SafeWrite8(showuimessage_2_patch_address + 1, 0xEE);
+  }
+}
+
 internal void GameLoop()
 {
-  if( GetKeyPressed(VK_HOME) ){
-    //MessageBox(NULL, "You just pressed a HOME key!", "Yey!", MB_OK);
+  if( IsActivated(VK_HOME, &isKeyHomeEnabled) ){
+    QueueUIMessage("You've just pressed HOME key!", 0, 1, 2.0f);
+    
     RunScriptLine("ts");
+    
+    SuppressUIMessages(true);
+    RunBatchScript("obatronach.txt");
+    SuppressUIMessages(false);
+  }
+  
+  if( IsActivated(VK_END, &isKeyEndEnabled) ){
+    QueueUIMessage_2("You've just pressed END key!", 2.0f, 0, "UIQuestUpdate");
+    
+    RunScriptLine("ts");
+    
+    SuppressUIMessages(true);
+    RunBatchScript("oblvlup.txt");
+    SuppressUIMessages(false);
   }
 }
 
@@ -91,7 +180,6 @@ internal BOOL WINAPI DllMain(HANDLE procHandle, DWORD reason, LPVOID reserved)
     MessageBox(NULL, "Obsilver is loaded!", "Yey!", MB_OK);
     
     //NOTE(adm244): patching in the oblivion main loop right after obse
-    //SafeWrite8(mainloop_hook_patch_address - 1, 0x90); // nop (for debugger friendliness)
     WriteRelJump(mainloop_hook_patch_address, (UInt32)&GameLoop_Hook);
   }
 
